@@ -1,0 +1,145 @@
+import googlemaps
+import pandas as pd
+
+
+def import_data():
+    gmaps = googlemaps.Client(key='AIzaSyD6X2I86Bqh9nbexbZwi0D7poWqTHS2WMA')
+
+    places = {}
+
+    # append all the places in indiana to this list
+
+    types = ['shop', 'store', 'stadium', 'gift shop', 'trail', 'amusement park', 'point_of_interest']
+
+    ##create data frame
+    cols = ['name', 'address', 'opening_hours', 'rating', 'price_level', 'website', 'type']
+    df = pd.DataFrame(columns=cols)
+
+    ## append all businesses in from close to far
+    for radius in range(500, 15000, 100):  # 20000
+        location = 'circle:' + str(radius) + '@39.791000, -86.148003'
+
+        ## categorize buisiness to add variety
+        for t in types:
+            place = gmaps.find_place(t, 'textquery',
+                                     ['business_status', 'formatted_address', 'rating', 'price_level',
+                                      'permanently_closed',
+                                      'name', 'user_ratings_total', 'types', 'place_id'], location)
+
+            # Valid values for the `fields` param for `find_place` are 'business_status', 'geometry/viewport/southwest/lng', 'rating', 'opening_hours', 'geometry/viewport/southwest', 'geometry/viewport/northeast/lat', 'geometry', 'plus_code', 'types', 'geometry/viewport/northeast', 'geometry/viewport', 'name', 'geometry/viewport/southwest/lat', 'formatted_address', 'icon', 'geometry/location', 'photos', 'geometry/location/lng', 'geometry/viewport/northeast/lng', 'place_id', 'price_level', 'permanently_closed', 'user_ratings_total', 'geometry/location/lat', these given field(s) are invalid: 'website'
+
+            ## if format usable
+            use = useable(place, gmaps)
+
+            # if not a repeated place
+            if use:
+                if (place['candidates'][0]['name'], place['candidates'][0]['formatted_address']) not in places:
+                    places[place['candidates'][0]['name'], place['candidates'][0]['formatted_address']] = place
+                    df = build_data_frame(df, place, gmaps)
+
+    return df
+
+
+def build_data_frame(df, place, gmaps):
+    tempdict = {}
+
+    tempdict['name'] = place['candidates'][0]['name']
+    tempdict['address'] = place['candidates'][0]['formatted_address']
+    tempdict['rating'] = place['candidates'][0]['rating']
+    tempdict['type'] = place['candidates'][0]['types'][0]
+    tempdict['website'] = gmaps.place(place['candidates'][0]['place_id'])['result']['website']
+
+    if 'price_level' in place['candidates'][0]:
+        tempdict['price_level'] = place['candidates'][0]['price_level']
+
+    if 'opening_hours' in place['candidates'][0]:
+        tempdict['opening_hours'] = place['candidates'][0]['opening_hours']
+
+    tempdf = pd.DataFrame(tempdict, index=[0],
+                          columns=['name', 'address', 'opening_hours', 'rating', 'price_level', 'website', 'type'])
+
+    dfconcat = pd.concat([df, tempdf], sort=False)
+
+    return dfconcat
+
+
+def find_best_places():
+    df = import_data()
+
+    df['rating'] = df['rating'].astype(int)
+    df.sort_values(['rating'], ascending=False)
+    df.sort_values(['price_level'])
+
+    result = df.head(5)
+    result = result.sort_values(['type'])
+
+    result = result.reset_index()
+    # result = result.drop('index')
+    result = result[['name', 'address', 'opening_hours', 'rating', 'price_level', 'website', 'type']]
+
+    result = add_time(result)
+
+    return result
+
+
+def useable(place, gmaps):
+    # {'candidates': [{'business_status': 'OPERATIONAL', 'formatted_address': '5901 Delong Rd, Indianapolis, IN 46254, United States', 'name': 'Go Ape', 'rating': 5, 'types': ['amusement_park', 'point_of_interest', 'establishment'], 'user_ratings_total': 19}], 'status': 'OK'}
+
+    if 'candidates' not in place:
+        return False
+
+    if len(place['candidates']) == 0:
+        return False
+
+    if 'rating' not in place['candidates'][0]:
+        return False
+
+    if 'rating' in place['candidates'][0]:
+        if place['candidates'][0]['rating'] < 3:
+            return False
+
+    if 'name' not in place['candidates'][0]:
+        return False
+
+    if 'website' not in gmaps.place(place['candidates'][0]['place_id'])['result']:
+        return False
+
+    if 'formatted_address' not in place['candidates'][0]:
+        return False
+
+    if 'Indianapolis, IN' not in place['candidates'][0]['formatted_address']:
+        return False
+
+    if 'permanently_closed' in place['candidates'][0] and place['candidates'][0]['permanently_closed'] == 'true':
+        return False
+
+    if 'types' not in place['candidates'][0]:
+        return False
+
+    if 'types' in place['candidates'][0]:
+        if 'liquor_store' in place['candidates'][0]['types']:
+            return False
+
+    if 'Smoke Shop' in place['candidates'][0]['name']:
+        return False
+
+    return True
+
+
+def add_time(df):
+    df['Duration'] = '2 hours'
+
+    df['Time'] = '0'
+
+    count = 9
+    for index, row in df.iterrows():
+        df.loc[index, 'Time'] = str(count) + ':00 AM'
+        count += 2
+        if count > 12:
+            count = count - 12
+
+    return df
+
+
+print(find_best_places())
+
